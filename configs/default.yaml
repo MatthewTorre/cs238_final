@@ -1,0 +1,16 @@
+environment:
+  fatigue_decay: 0.1
+  fatigue_increment: 0.25
+  reward_scale: 1.0
+  stochasticity: 0.15
+
+agent:
+  fatigue_threshold: 0.55
+  deliberation_cost: 0.25
+  heuristic_bias: 0.2
+  delegation_penalty: 0.05
+
+simulation:
+  horizon: 200
+  num_episodes: 20
+  log_dir: results/logs
