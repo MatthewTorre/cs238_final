@@ -1,16 +1,33 @@
 environment:
-  fatigue_decay: 0.1
-  fatigue_increment: 0.25
-  reward_scale: 1.0
-  stochasticity: 0.15
+  success_easy_habitual: 0.8
+  success_hard_habitual: 0.5
+  success_easy_deliberate: 0.9
+  success_hard_deliberate: 0.8
+  habitual_effort_cost: 0.15
+  deliberate_effort_cost: 0.4
+  reward_easy_success: 1.0
+  reward_hard_success: 1.4
+  failure_penalty: -0.6
+  habitual_fatigue_increment: 0.03
+  deliberate_fatigue_increment: 0.09
+  fatigue_failure_penalty: 0.1
+  fatigue_success_relief: 0.05
+  fatigue_recovery: 0.03
+  fatigue_hard_task_penalty: 0.05
+  observation_noise: 0.04
+  difficulty_flip_chance: 0.3
 
 agent:
-  fatigue_threshold: 0.55
-  deliberation_cost: 0.25
-  heuristic_bias: 0.2
-  delegation_penalty: 0.05
+  epsilon: 0.1
+  alpha: 0.25
+  initial_efficiency: 0.9
+  fatigue_penalty: 0.45
+  habitual_hard_penalty: 0.3
+  deliberate_easy_penalty: 0.1
 
 simulation:
-  horizon: 200
-  num_episodes: 20
+  horizon: 150
+  num_episodes: 25
   log_dir: results/logs
+  plot_dir: results/plots
+  record_trajectories: true
