@@ -26,20 +26,31 @@ class EnvironmentParameters:
     reward_hard_success: float = 1.4
     failure_penalty: float = -0.5
     reward_noise: float = 0.02
-    habitual_fatigue_increment: float = 0.03
+    habitual_fatigue_increment: float = 0.02
     deliberate_fatigue_increment: float = 0.08
     fatigue_failure_penalty: float = 0.08
-    fatigue_success_relief: float = 0.04
-    fatigue_recovery: float = 0.03
+    fatigue_success_relief: float = 0.10
+    fatigue_recovery: float = 0.08
     fatigue_hard_task_penalty: float = 0.05
     observation_noise: float = 0.03
     difficulty_flip_chance: float = 0.30
+
+    # Rest action parameters
+    rest_recovery: float = 0.20
+    rest_reward_penalty: float = -0.1
+
+    # Homeostatic recovery
+    passive_recovery_rate: float = 0.02  # Passive recovery proportional to fatigue (reduced to prevent over-recovery)
+
+    # Fatigue-dependent performance penalties
+    deliberate_fatigue_penalty: float = 0.6  # How much fatigue reduces deliberate success (0.6 = 60% reduction at max fatigue)
+    habitual_fatigue_penalty: float = 0.2  # How much fatigue reduces habitual success (0.2 = 20% reduction at max fatigue)
 
 
 class DecisionEnvironment:
     """Environment with binary difficulty and continuous fatigue."""
 
-    ACTIONS = ("habitual", "deliberate")
+    ACTIONS = ("habitual", "deliberate", "rest")
 
     def __init__(self, params: EnvironmentParameters, rng: np.random.Generator | None = None):
         self.params = params
@@ -86,7 +97,7 @@ class DecisionEnvironment:
         effort = self._effort_cost(action)
         self._last_effort = effort
 
-        reward = self._compute_reward(success, effort)
+        reward = self._compute_reward(success, effort, action)
         self._fatigue = self._clip(self._fatigue + self._fatigue_delta(action, success))
 
         if self.rng.random() < self.params.difficulty_flip_chance:
@@ -124,26 +135,46 @@ class DecisionEnvironment:
     # Internal helpers                                                      #
     # --------------------------------------------------------------------- #
     def _success_probability(self, action: Action) -> float:
+        if action == "rest":
+            return 1.0  # Rest always "succeeds"
+
+        # Get base success probability
         if self._difficulty == 0:
-            return (
+            base_prob = (
                 self.params.success_easy_habitual
                 if action == "habitual"
                 else self.params.success_easy_deliberate
             )
-        return (
-            self.params.success_hard_habitual
-            if action == "habitual"
-            else self.params.success_hard_deliberate
-        )
+        else:
+            base_prob = (
+                self.params.success_hard_habitual
+                if action == "habitual"
+                else self.params.success_hard_deliberate
+            )
+
+        # Apply fatigue penalty (deliberate actions suffer more from fatigue)
+        if action == "deliberate":
+            # Deliberate actions require cognitive resources - heavily impaired by fatigue
+            fatigue_penalty = self.params.deliberate_fatigue_penalty * self._fatigue
+        else:
+            # Habitual actions are more robust to fatigue
+            fatigue_penalty = self.params.habitual_fatigue_penalty * self._fatigue
+
+        return max(0.0, base_prob - fatigue_penalty)
 
     def _effort_cost(self, action: Action) -> float:
+        if action == "rest":
+            return 0.0  # No effort for resting
         return (
             self.params.habitual_effort_cost
             if action == "habitual"
             else self.params.deliberate_effort_cost
         )
 
-    def _compute_reward(self, success: bool, effort: float) -> float:
+    def _compute_reward(self, success: bool, effort: float, action: Action) -> float:
+        if action == "rest":
+            # Rest has opportunity cost but enables recovery
+            return self.params.rest_reward_penalty
         base_reward = (
             self.params.reward_easy_success if self._difficulty == 0 else self.params.reward_hard_success
         )
@@ -152,6 +183,13 @@ class DecisionEnvironment:
         return outcome - effort + noise
 
     def _fatigue_delta(self, action: Action, success: bool) -> float:
+        # Handle rest action
+        if action == "rest":
+            # Strong recovery from resting, plus passive recovery
+            passive_recovery = -self.params.passive_recovery_rate * self._fatigue
+            return -self.params.rest_recovery + passive_recovery
+
+        # Standard action fatigue dynamics
         base = (
             self.params.habitual_fatigue_increment
             if action == "habitual"
@@ -159,7 +197,11 @@ class DecisionEnvironment:
         )
         difficulty_term = self.params.fatigue_hard_task_penalty if self._difficulty == 1 else -self.params.fatigue_recovery
         outcome_term = -self.params.fatigue_success_relief if success else self.params.fatigue_failure_penalty
-        return base + difficulty_term + outcome_term
+
+        # Add passive/homeostatic recovery proportional to current fatigue
+        passive_recovery = -self.params.passive_recovery_rate * self._fatigue
+
+        return base + difficulty_term + outcome_term + passive_recovery
 
     @staticmethod
     def _clip(value: float) -> float:
