@@ -15,6 +15,7 @@ This repository accompanies the final project proposal exploring how agents can 
    python -m src.main --config configs/default.yaml
    ```
    Results are stored under `results/logs` as JSON snapshots that include reward trajectories and fatigue traces.
+   - Switch bandit policy via `agent.policy` in the config: `epsilon_greedy` (default), `ucb`, `thompson`, or `linucb`. Policy-specific hyperparameters are also exposed in `configs/default.yaml`.
 3. **Inspect results**
    - Load JSON logs into `notebooks/exploration.ipynb` for plotting fatigue vs. reward.
    - Export polished figures to `report/figures/` for inclusion in the final write-up.

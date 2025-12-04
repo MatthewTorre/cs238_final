@@ -1,0 +1,159 @@
+\documentclass{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{amsmath}
+
+\title{Learning Efficient Cognitive Effort Allocation Under Bounded Rationality}
+
+\author{
+\name Matthew Torre \email mtorre04@stanford.edu \\
+\name Kim Ngo \email kimdngo@stanford.edu \\
+\addr Stanford University
+}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Humans and autonomous agents rarely act as perfect optimizers because attention, time, and computation are constrained. This project studies how an agent should allocate cognitive effort between low-effort habitual choices and high-effort deliberation when fatigue accumulates over time. We build a stochastic decision-making environment with latent fatigue tied to varying task difficulty and two action modes (habitual and deliberate) that incur different effort--reward trade-offs. Each action mode dynamically influences fatigue. A simple epsilon-greedy agent learns an efficiency-based policy that balances expected reward against effort costs, and simulations demonstrate an intuitive fatigue dynamic where persistent deliberation boosts short-term performance but increases fatigue, while shifting toward habitual actions maintains more stable efficiency over longer horizons. The simulation framework logs the trajectories of reward, fatigue, and efficiency which allows for the systematic comparison of alternative policies and provides an initial direction for studying bounded rationality and computational models of decision fatigue.
+\end{abstract}
+
+\section{Introduction}
+Real-world decision makers face a simple but pressing constraint: they cannot think hard about every choice. Time, attention, and computation are bounded, so agents satisfice instead of optimize, echoing Simon's bounded rationality and the empirical findings on decision fatigue. Over long horizons this tension compounds---deliberation can lift performance early yet depletes resources that are needed later, while purely habitual behavior risks lock-in to brittle shortcuts when conditions shift. The central problem of this project is therefore \emph{how to allocate cognitive effort across a sequence of partially observed tasks so that long-run reward efficiency remains high despite fatigue.}
+
+We model the setting as a partially observable Markov decision process (POMDP) with latent fatigue, stochastic binary task difficulty, and two action modes implemented in code: a low-effort habitual response and a high-effort deliberate computation. The environment dynamics (\texttt{src/env.py}) explicitly couple actions, success probabilities, and fatigue accumulation, while the agent (\texttt{src/agent.py}) maintains reward-per-effort estimates and acts with epsilon-greedy exploration. This framing supports richer methods---particle-filter belief updates, contextual bandits for rest vs.\ act scheduling, and delegation actions---while remaining simple enough to analyze. Running \texttt{python3 -m src.main --config configs/default.yaml} produces reproducible logs (e.g., \texttt{results/logs/run\_1764835427.json}) and plots of reward, fatigue, and efficiency trajectories (\texttt{results/plots/}), which currently show a mean reward-per-effort ratio of $1.48$ over $25$ episodes and fatigue climbing toward saturation when the agent over-deliberates.
+
+Our contributions are threefold: (i) a compact POMDP environment that makes the trade-off between accuracy and cognitive wear explicit and measurable; (ii) a baseline efficiency-tracking agent whose learned policy surfaces the qualitative signature of fatigue-driven shifts toward low-effort actions; and (iii) an evaluation pipeline that logs trajectories and renders figures, enabling side-by-side comparisons as we add belief-aware planners and bandit-style schedulers. Together these pieces provide an empirical testbed for studying bounded rationality and decision fatigue with quantitative, reproducible evidence.
+
+\section{Related Work}
+Bounded rationality \cite{simon1955} and studies of limited deliberation \cite{russell1991} motivate algorithms that explicitly price computation. Decision fatigue research shows declining choice quality under sustained effort \cite{danziger2011,blain2016}, while habit formation highlights how low-effort policies can dominate over time \cite{wood2016}. Our formalism follows the POMDP framing of sequential decisions under uncertainty \cite{kochenderfer2022}, but departs by treating fatigue as a first-class latent state that couples to transition and reward dynamics. Bandit formulations provide lightweight alternatives when belief tracking is costly; rational inattention \cite{sims2003} similarly captures selective processing. We extend this line by offering a reproducible simulation that exposes effort-aware policies to both partial observability and fatigue-driven non-stationarity, letting us compare POMDP solvers against bandit-inspired schedulers within one codebase.
+
+\section{Problem Formulation}
+We model an episodic sequence of $T$ decisions. The latent state $s_t = (d_t, f_t)$ pairs binary task difficulty $d_t \in \{0,1\}$ (easy/hard) with continuous fatigue $f_t \in [0,1]$. At each step the agent selects action $a_t \in \{\text{habitual}, \text{deliberate}\}$. Transitions follow:
+\begin{itemize}
+    \item Difficulty flips with probability $\beta$ (\texttt{difficulty\_flip\_chance}), creating a non-stationary task.
+    \item Fatigue evolves as $f_{t+1} = \mathrm{clip}(f_t + \Delta_f(a_t, d_t, \text{outcome}))$ where $\Delta_f$ adds action-dependent increments, penalizes hard tasks, and grants relief on success.
+\end{itemize}
+Observations $o_t = (d_t + \epsilon_d, f_t + \epsilon_f)$ are noisy with Gaussian noise $\epsilon \sim \mathcal{N}(0, \sigma^2)$ clipped to $[0,1]$, reflecting limited self-monitoring. Rewards combine outcome value and effort: $r_t = \text{outcome}(d_t, a_t, \text{success}) - \text{effort}(a_t) + \eta$ with small reward noise $\eta$. This problem is naturally a POMDP because fatigue is latent and difficulty is only partially observed; bandits serve as approximate solvers when we collapse the belief to a minimal context (e.g., current observation) and optimize action efficiency without full planning.
+
+\section{Methods}
+Our computational study is implemented end-to-end in the accompanying codebase and centers on a small POMDP that captures fatigue, partial observability, and effort-sensitive rewards.
+
+\subsection{POMDP Model}
+\textbf{State.} The latent state $s_t = (d_t, f_t)$ combines a binary task difficulty $d_t \in \{0,1\}$ and continuous fatigue $f_t \in [0,1]$. Difficulty stochastically flips with probability $\beta$ (\texttt{difficulty\_flip\_chance}). Fatigue drifts according to action-dependent increments plus penalties for hard tasks and failed outcomes (\texttt{src/env.py}).
+
+\textbf{Observations.} The agent receives noisy views of difficulty and fatigue: $o_t = (d_t + \epsilon_d, f_t + \epsilon_f)$ where $\epsilon \sim \mathcal{N}(0, \sigma^2)$ and is clipped to $[0,1]$ (\texttt{observation\_noise}). This encodes bounded introspection.
+
+\textbf{Actions.} Two modes are implemented: \texttt{habitual} (low effort, lower success on hard tasks) and \texttt{deliberate} (higher effort, higher success on hard tasks). Delegation is planned but not yet enabled in the current code path.
+
+\textbf{Transition and reward shaping.} Success probabilities depend on $(d_t, a_t)$ (e.g., \texttt{success\_hard\_deliberate} $=0.8$) and effort costs are subtracted from reward. Outcome rewards are $r_{\text{easy}}$ or $r_{\text{hard}}$ on success with a penalty on failure; small Gaussian noise perturbs rewards to avoid determinism. Fatigue evolves via action-specific increments plus relief on success and penalties on failure and hard tasks, creating a shaped signal that makes over-deliberation visibly costly later in an episode.
+
+\textbf{Belief and particle filtering.} The current baseline uses a lightweight belief: the agent treats the latest observation as the belief mean and tracks running reward-per-effort efficiencies per action. This yields an epsilon-greedy policy: explore with probability $\epsilon$, otherwise pick the action with highest penalized efficiency (fatigue and difficulty penalties baked into \texttt{Agent.\_scored\_efficiency}). A particle filter drop-in is planned for richer inference over $(d_t, f_t)$ by propagating samples through the known transition model and reweighting on observation likelihood; slots for belief-aware updates are exposed by the separation between environment dynamics (\texttt{src/env.py}) and agent policy (\texttt{src/agent.py}).
+
+\textbf{Data and reproducibility.} Each run logs trajectories and summary statistics to \texttt{results/logs/run\_<timestamp>.json} and renders reward, fatigue, and efficiency plots to \texttt{results/plots/}. Configurable hyperparameters live in \texttt{configs/default.yaml}, ensuring full reproducibility of the reported metrics.
+
+\subsection{Policies and Solvers}
+The agent supports multiple bandit-style solvers that act on reward-per-effort: (i) epsilon-greedy (default) with running estimates; (ii) UCB with exploration bonuses; (iii) Gaussian Thompson Sampling; and (iv) contextual LinUCB using fatigue and difficulty as features. Policy choice and hyperparameters are configured in \texttt{configs/default.yaml}. Planned POMDP solvers include POMCP and DESPOT for belief-aware tree search, and point-based value iteration for compact belief approximations. These will let us compare full belief maintenance to these lightweight bandit schedulers.
+
+\subsection{Bandit Algorithms}
+In bandit form, the agent treats difficulty and fatigue observations as context. We currently run $\epsilon$-greedy; extensions will test UCB and Thompson Sampling for non-contextual cases, and LinUCB for contextual bandits that use $(\hat{d}_t, \hat{f}_t)$ to predict action efficiency. These offer scalable alternatives when full belief propagation is too costly.
+
+\subsection{Baselines}
+We compare against simple policies: (i) always-habitual; (ii) always-deliberate; (iii) alternating or rest-heavy schedules that minimize fatigue accumulation; (iv) a difficulty-aware rule (habitual on easy, deliberate on hard); and (v) the learned threshold-fatigue policy from the efficiency-tracking agent. These baselines isolate how much benefit comes from learning versus hand-crafted heuristics. Bandit variants above serve as adaptive baselines that can be swapped in without changing environment code.
+
+\section{Experiments}
+We simulate $25$ episodes of horizon $150$ using \texttt{configs/default.yaml}, sweeping four bandit policies: epsilon-greedy, UCB, Thompson Sampling, and LinUCB. Results are logged per episode and aggregated with mean and standard deviation. Metrics include total reward, cumulative fatigue, total effort, and reward-per-effort ratio. A recent sweep produced:
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+Policy & Reward $\uparrow$ & Fatigue $\downarrow$ & Effort & Reward/Effort $\uparrow$ \\
+\midrule
+Epsilon-greedy & $69.9 \pm 9.9$ & $140.2 \pm 6.1$ & $49.3 \pm 5.4$ & $1.43 \pm 0.21$ \\
+UCB & $67.4 \pm 11.0$ & $137.8 \pm 9.4$ & $43.6 \pm 16.1$ & $1.75 \pm 0.66$ \\
+Thompson & $69.7 \pm 13.0$ & $134.7 \pm 10.9$ & $38.2 \pm 16.4$ & $2.09 \pm 0.75$ \\
+LinUCB & $\mathbf{75.4} \pm 10.3$ & $137.4 \pm 8.4$ & $47.9 \pm 11.4$ & $1.69 \pm 0.54$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Representative logs live under \texttt{results/logs/<policy>/run\_<timestamp>.json}. LinUCB yielded the highest mean reward, while Thompson Sampling produced the best reward-per-effort ratios by selectively conserving effort.
+
+\subsection{Metrics}
+We track reward, fatigue trajectory, success rate, action distribution over time, burnout time (when fatigue saturates), and belief accuracy for any belief-aware variants. Reward-per-effort serves as the primary efficiency metric. All trajectories are plotted automatically per policy.
+
+\subsection{Figures and Tables}
+Core plots include reward, fatigue, and efficiency trajectories averaged over episodes (rendered automatically). The following figures are ready for inclusion:
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/reward_linucb.png}
+  \caption{Mean reward trajectory across episodes for LinUCB.}
+\end{figure}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/fatigue_thompson.png}
+  \caption{Fatigue trajectory under Thompson Sampling showing slower effort expenditure and later saturation.}
+\end{figure}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/efficiency_ucb.png}
+  \caption{Efficiency (reward per effort) under UCB with wide exploration bonuses early in the episode.}
+\end{figure}
+These PNGs are exported to \texttt{report/figures/} from the latest runs.
+
+\section{Discussion}
+The efficiency-tracking agent learns to start with more deliberate actions when fatigue is low and gradually shift toward habitual responses as fatigue rises, capturing a qualitative signature of decision fatigue. The shaped fatigue dynamics make over-deliberation visibly costly, and the partial observability encourages conservative exploration. Limitations include the minimal belief (no full particle filter yet), binary difficulty, and the absence of explicit delegation/rest actions. Extending to richer observation models and adding rest/delegate actions would let us test value-of-computation hypotheses more directly.
+
+\section{Conclusion}
+We presented a compact, reproducible POMDP testbed for bounded-resource decision making, along with an efficiency-tracking baseline that demonstrates plausible fatigue dynamics and competitive reward-per-effort performance. Future work will add belief-aware planners, contextual bandits, and delegation to probe how agents should schedule computation under uncertainty and fatigue.
+
+\subsubsection*{Acknowledgments}
+We thank collaborators and teaching staff for feedback on early prototypes.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}\itemsep0pt
+
+\bibitem[Blain et~al.(2016)]{blain2016}
+B. Blain, G. Hollard, and M. Pessiglione.
+\newblock Neural mechanisms underlying the impact of cognitive fatigue on economic decision making.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 113(10):U6972--U6982, 2016.
+
+\bibitem[Danziger et~al.(2011)]{danziger2011}
+S. Danziger, J. Levav, and L. Avnaim-Pesso.
+\newblock Extraneous factors in judicial decisions.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 108(17):6889--6892, 2011.
+
+\bibitem[Kochenderfer et~al.(2022)]{kochenderfer2022}
+M.~J. Kochenderfer, T.~A. Wheeler, and K.~H. Wray.
+\newblock \emph{Algorithms for Decision Making}.
+\newblock MIT Press, 2022.
+
+\bibitem[Russell and Wefald(1991)]{russell1991}
+S. Russell and E. Wefald.
+\newblock \emph{Do the Right Thing: Studies in Limited Rationality}.
+\newblock MIT Press, 1991.
+
+\bibitem[Simon(1955)]{simon1955}
+H.~A. Simon.
+\newblock A behavioral model of rational choice.
+\newblock \emph{Quarterly Journal of Economics}, 69(1):99--118, 1955.
+
+\bibitem[Sims(2003)]{sims2003}
+C.~A. Sims.
+\newblock Implications of rational inattention.
+\newblock \emph{Journal of Monetary Economics}, 50(3):665--690, 2003.
+
+\bibitem[Wood and R{\"u}nger(2016)]{wood2016}
+W. Wood and D. R{\"u}nger.
+\newblock Psychology of habit.
+\newblock \emph{Annual Review of Psychology}, 67:289--314, 2016.
+
+\end{thebibliography}
+
+\end{document}

@@ -18,12 +18,19 @@ environment:
   difficulty_flip_chance: 0.3
 
 agent:
+  policy: epsilon_greedy
   epsilon: 0.1
   alpha: 0.25
   initial_efficiency: 0.9
   fatigue_penalty: 0.45
   habitual_hard_penalty: 0.3
   deliberate_easy_penalty: 0.1
+  ucb_c: 1.0
+  thompson_prior_mean: 0.0
+  thompson_prior_var: 1.0
+  thompson_obs_var: 1.0
+  linucb_alpha: 1.0
+  linucb_dim: 3
 
 simulation:
   horizon: 150

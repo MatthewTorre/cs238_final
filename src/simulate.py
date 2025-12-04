@@ -40,7 +40,7 @@ def run_episode(agent: Agent, env: DecisionEnvironment, horizon: int) -> Tuple[D
         action = agent.select_action(observation["fatigue"], observation["difficulty"])
         reward, success, fatigue_value = env.step(action)
         effort = env.last_effort
-        agent.observe_outcome(action, reward, effort)
+        agent.observe_outcome(action, reward, effort, observation["fatigue"], observation["difficulty"])
 
         observation = env.get_observation()
         episode["rewards"].append(reward)
